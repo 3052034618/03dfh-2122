@@ -10,7 +10,7 @@ import type { CancelReason } from '@/types'
 
 function SpotContent({ spotId }: { spotId: string | undefined }) {
   const navigate = useNavigate()
-  const { spots, replies, sendReply, confirmReply, trips, checkIn, cancelTrip, getWaitlistPosition } = useAppStore()
+  const { spots, replies, sendReply, confirmReply, trips, checkIn, cancelTrip, getWaitlistPosition, checkNoshowTrips } = useAppStore()
   const [showConfirmAnim, setShowConfirmAnim] = useState(false)
   const [showCancelModal, setShowCancelModal] = useState(false)
   const [cancelReason, setCancelReason] = useState<CancelReason>('other')
@@ -18,11 +18,13 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
   const [, setTick] = useState(0)
 
   useEffect(() => {
+    checkNoshowTrips()
     const interval = setInterval(() => {
+      checkNoshowTrips()
       setTick(t => t + 1)
     }, 10000)
     return () => clearInterval(interval)
-  }, [])
+  }, [checkNoshowTrips])
 
   const spot = spots.find(s => s.id === spotId)
   const lockCountdown = useCountdownShort(spot?.lockTime ?? new Date().toISOString())
@@ -35,6 +37,8 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
   const isArrived = myTrip?.status === 'arrived'
   const isCancelled = myTrip?.status === 'cancelled'
   const isMissed = myTrip?.status === 'missed'
+  const isNoshow = myTrip?.status === 'noshow'
+  const isFilled = spot?.isFilled
 
   const waitlistPosition = useMemo(() => {
     if (!spotId) return 0
@@ -92,14 +96,14 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
   ]
 
   const renderStatusBanner = () => {
-    if (isWaitlist) {
+    if (isNoshow) {
       return (
-        <div className="mb-4 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30">
+        <div className="mb-4 p-3 rounded-xl bg-neon-pink/10 border border-neon-pink/30">
           <div className="flex items-center gap-2">
-            <ListChecks size={16} className="text-yellow-400" />
+            <AlertTriangle size={16} className="text-neon-pink" />
             <div>
-              <p className="text-sm font-bold text-yellow-400">候补中 · 第 {waitlistPosition} 位</p>
-              <p className="text-xs text-yellow-400/70">当前缺{spot.missingCount}人，有 {replies.filter(r => r.spotId === spot.id && r.status === 'pending').length} 人在抢</p>
+              <p className="text-sm font-bold text-neon-pink">爽约</p>
+              <p className="text-xs text-neon-pink/70">开场后未到店也未取消，已记录为爽约</p>
             </div>
           </div>
         </div>
@@ -112,7 +116,27 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
             <XCircle size={16} className="text-neon-pink" />
             <div>
               <p className="text-sm font-bold text-neon-pink">已错过</p>
-              <p className="text-xs text-neon-pink/70">门店已确认其他玩家，下次手速快一点~</p>
+              <p className="text-xs text-neon-pink/70">
+                {isFilled ? '车位已补满，下次手速快一点~' : '门店已确认其他玩家'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )
+    }
+    if (isWaitlist) {
+      return (
+        <div className="mb-4 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30">
+          <div className="flex items-center gap-2">
+            <ListChecks size={16} className="text-yellow-400" />
+            <div>
+              <p className="text-sm font-bold text-yellow-400">候补中 · 第 {waitlistPosition} 位</p>
+              <p className="text-xs text-yellow-400/70">
+                {isFilled
+                  ? `车位已补满，当前 ${replies.filter(r => r.spotId === spot.id && r.status === 'waitlisted').length} 人在候补`
+                  : `当前缺${spot.missingCount}人，有 ${replies.filter(r => r.spotId === spot.id && r.status === 'pending').length} 人在抢`
+                }
+              </p>
             </div>
           </div>
         </div>
@@ -376,7 +400,7 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
             </div>
           )}
 
-          {myReply && !isConfirmed && !isArrived && !isCancelled && !isMissed && (
+          {myReply && !isConfirmed && !isArrived && !isCancelled && !isMissed && !isNoshow && (
             <div className="glass rounded-2xl p-4 border border-neon-orange/20">
               <p className="text-xs text-white/40 mb-1">你已发送</p>
               <p className="text-sm text-neon-orange font-medium">「{myReply.label}」</p>
@@ -413,7 +437,7 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
         </div>
       </div>
 
-      {!isConfirmed && !isPending && !isWaitlist && !isArrived && !isCancelled && !isMissed && (
+      {!isConfirmed && !isPending && !isWaitlist && !isArrived && !isCancelled && !isMissed && !isNoshow && !isFilled && (
         <div className="fixed bottom-0 left-0 right-0 glass-strong p-4 safe-bottom z-50">
           <div className="max-w-md mx-auto">
             <p className="text-[10px] text-white/30 mb-2">快捷回复</p>
@@ -441,7 +465,27 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
         </div>
       )}
 
-      {(isPending || isWaitlist) && !isConfirmed && !isArrived && !isCancelled && !isMissed && (
+      {!isConfirmed && !isPending && !isWaitlist && !isArrived && !isCancelled && !isMissed && !isNoshow && isFilled && (
+        <div className="fixed bottom-0 left-0 right-0 glass-strong p-4 safe-bottom z-50">
+          <div className="max-w-md mx-auto">
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-neon-pink/10 border border-neon-pink/30">
+              <XCircle size={18} className="text-neon-pink flex-shrink-0" />
+              <div className="flex-1">
+                <p className="text-sm font-bold text-neon-pink">车位已补满</p>
+                <p className="text-xs text-neon-pink/60">这辆车的位置已经被抢光了，看看别的车吧</p>
+              </div>
+              <button
+                onClick={() => navigate('/channel')}
+                className="px-3 py-1.5 rounded-lg bg-neon-pink/20 text-neon-pink text-xs font-medium"
+              >
+                换一辆
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {(isPending || isWaitlist) && !isConfirmed && !isArrived && !isCancelled && !isMissed && !isNoshow && (
         <div className="fixed bottom-0 left-0 right-0 glass-strong p-4 safe-bottom z-50">
           <div className="max-w-md mx-auto">
             <div className="flex items-center justify-between">

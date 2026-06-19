@@ -54,7 +54,18 @@ export default function Trips() {
         const isStarting = isStartingSoon(t.spot.startTime)
         return isLocking || isLate || isStarting
       })
+      .map(t => {
+        const travelPlan = getTravelPlan(t.spot!.distance, t.spot!.startTime)
+        const isLocking = isLockingSoon(t.spot!.lockTime)
+        const isLate = travelPlan.lateRisk.isLate
+        let priority = 0
+        if (isLate && t.trip.status === 'confirmed') priority = 3
+        else if (isLocking) priority = 2
+        else priority = 1
+        return { ...t, priority }
+      })
       .sort((a, b) => {
+        if (b.priority !== a.priority) return b.priority - a.priority
         const timeA = new Date(a.spot!.startTime).getTime()
         const timeB = new Date(b.spot!.startTime).getTime()
         return timeA - timeB
@@ -94,25 +105,23 @@ export default function Trips() {
     if (!topTrip.spot) return null
 
     const travelPlan = getTravelPlan(topTrip.spot.distance, topTrip.spot.startTime)
-    const isLocking = isLockingSoon(topTrip.spot.lockTime)
-    const isLate = travelPlan.lateRisk.isLate
 
     let type: 'lock' | 'late' | 'start' = 'start'
     let title = ''
     let desc = ''
 
-    if (isLate && topTrip.trip.status === 'confirmed') {
+    if (topTrip.priority === 3) {
       type = 'late'
       title = '迟到风险警告'
       desc = `「${topTrip.spot.scriptName}」路程约需 ${travelPlan.travelMinutes} 分钟，可能赶不上开场`
-    } else if (isLocking) {
+    } else if (topTrip.priority === 2) {
       type = 'lock'
       title = '即将锁车'
       desc = `「${topTrip.spot.scriptName}」距离锁车不足 15 分钟，请尽快确认出发`
     } else {
       type = 'start'
       title = '即将开场'
-      desc = `「${topTrip.spot.scriptName}」马上就要开场了`
+      desc = `「${topTrip.spot.scriptName}」还有不到 30 分钟开场`
     }
 
     return { type, title, desc, spotId: topTrip.spot.id }

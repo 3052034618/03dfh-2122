@@ -425,23 +425,30 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   checkNoshowTrips: () => {
     const now = Date.now()
-    const NOSHOW_GRACE_MINUTES = 30
+    const NOSHOW_GRACE_MINUTES = 5
     let hasChanges = false
 
     const newTrips = get().trips.map(trip => {
-      if (trip.status !== 'confirmed' && trip.status !== 'pending') return trip
       const spot = get().spots.find(s => s.id === trip.spotId)
       if (!spot) return trip
       const startTime = new Date(spot.startTime).getTime()
-      const graceEnd = startTime + NOSHOW_GRACE_MINUTES * 60 * 1000
-      if (now > graceEnd && trip.status === 'confirmed') {
-        hasChanges = true
-        return { ...trip, status: 'noshow' as const, noshowCount: (trip.noshowCount || 0) + 1 }
+      const lockTime = new Date(spot.lockTime).getTime()
+
+      if (trip.status === 'confirmed') {
+        const graceEnd = startTime + NOSHOW_GRACE_MINUTES * 60 * 1000
+        if (now > graceEnd) {
+          hasChanges = true
+          return { ...trip, status: 'noshow' as const, noshowCount: (trip.noshowCount || 0) + 1 }
+        }
       }
-      if (now > startTime && trip.status === 'pending') {
-        hasChanges = true
-        return { ...trip, status: 'missed' as const }
+
+      if (trip.status === 'pending' || trip.status === 'waitlist') {
+        if (now > lockTime) {
+          hasChanges = true
+          return { ...trip, status: 'missed' as const }
+        }
       }
+
       return trip
     })
 

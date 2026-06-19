@@ -1,33 +1,42 @@
-import { useState, useMemo } from 'react'
+import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Check, X, Clock, MapPin, Users } from 'lucide-react'
+import { ArrowLeft, Check, X, Clock, MapPin, Users, AlertTriangle } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { formatTime } from '@/utils/filter'
 import type { ReplyRecord, GameSpot } from '@/types'
 
 export default function StoreQueue() {
   const navigate = useNavigate()
-  const { getStoreQueue, confirmPlayer, rejectPlayer, simulateOtherReplies } = useAppStore()
-  const [, setTick] = useState(0)
+  const { replies, spots, confirmPlayer, rejectPlayer, simulateOtherReplies } = useAppStore()
 
-  const queue = useMemo(() => getStoreQueue(), [getStoreQueue, setTick]) // eslint-disable-line react-hooks/exhaustive-deps
+  const queue = useMemo(() => {
+    return replies
+      .filter(r => r.status === 'pending')
+      .map(r => ({
+        reply: r,
+        spot: spots.find(s => s.id === r.spotId)!
+      }))
+      .filter(item => item.spot)
+      .sort((a, b) =>
+        new Date(a.reply.sentAt).getTime() - new Date(b.reply.sentAt).getTime()
+      )
+  }, [replies, spots])
+
+  const pendingCount = queue.length
+
+  const firstPendingSpotId = queue[0]?.spot?.id
 
   const handleConfirm = (replyId: string, spotId: string) => {
     confirmPlayer(replyId, spotId)
-    setTick(t => t + 1)
   }
 
   const handleReject = (replyId: string, spotId: string) => {
     rejectPlayer(replyId, spotId)
-    setTick(t => t + 1)
   }
 
   const handleSimulate = (spotId: string) => {
     simulateOtherReplies(spotId)
-    setTick(t => t + 1)
   }
-
-  const pendingCount = queue.filter(q => q.reply.status === 'pending').length
 
   return (
     <div className="min-h-screen bg-gradient-night pb-24">
@@ -57,8 +66,7 @@ export default function StoreQueue() {
           </div>
           <button
             onClick={() => {
-              const firstSpotId = queue[0]?.spot?.id
-              if (firstSpotId) handleSimulate(firstSpotId)
+              if (firstPendingSpotId) handleSimulate(firstPendingSpotId)
             }}
             className="px-3 py-2 rounded-full bg-neon-purple/20 text-neon-purple text-xs font-medium border border-neon-purple/30"
           >
@@ -104,6 +112,7 @@ function QueueItem({ reply, spot, onConfirm, onReject }: {
   }
 
   const sentAgo = Math.floor((Date.now() - new Date(reply.sentAt).getTime()) / 60000)
+  const isStartingSoon = new Date(spot.startTime).getTime() - Date.now() < 30 * 60 * 1000
 
   return (
     <div className="glass rounded-2xl p-4 border-l-4 border-l-neon-orange">
@@ -127,6 +136,12 @@ function QueueItem({ reply, spot, onConfirm, onReject }: {
             </div>
           </div>
         </div>
+        {isStartingSoon && (
+          <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-neon-orange/20">
+            <AlertTriangle size={10} className="text-neon-orange" />
+            <span className="text-[9px] text-neon-orange font-medium">紧急</span>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-2 mb-3">
@@ -137,12 +152,22 @@ function QueueItem({ reply, spot, onConfirm, onReject }: {
         <div className="px-2 py-1 rounded bg-night-800 text-[10px] text-white/40">
           开场 {formatTime(spot.startTime)}
         </div>
+        {spot.isFilled && (
+          <div className="px-2 py-1 rounded bg-neon-green/10 text-[10px] text-neon-green">
+            已补满
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-2">
         <button
           onClick={onConfirm}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-neon-green/20 text-neon-green text-xs font-medium border border-neon-green/30 active:scale-95 transition-transform"
+          disabled={spot.isFilled && spot.missingCount <= 0}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium border active:scale-95 transition-transform ${
+            spot.isFilled && spot.missingCount <= 0
+              ? 'bg-night-700 text-white/20 border-night-700 cursor-not-allowed'
+              : 'bg-neon-green/20 text-neon-green border-neon-green/30'
+          }`}
         >
           <Check size={14} />
           确认补位
