@@ -1,41 +1,52 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, MapPin, Clock, Users, Flame, ShieldCheck, BadgeCheck, Navigation, Star, Send, CheckCircle2, AlertTriangle, Timer, Car, DoorOpen } from 'lucide-react'
+import { ArrowLeft, MapPin, Clock, Users, Flame, ShieldCheck, BadgeCheck, Navigation, Star, Send, CheckCircle2, AlertTriangle, Timer, Car, DoorOpen, XCircle, MapPinned, X, ListChecks } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { QUICK_REPLIES } from '@/data/mock'
 import { useCountdownShort, useCountdown } from '@/hooks/useCountdown'
-import { formatTime, calculateDepartureTime, calculateArrivalTime, isAtRiskOfLate } from '@/utils/filter'
+import { formatTime, getTravelPlan, isLockingSoon } from '@/utils/filter'
+import { CURRENT_PLAYER } from '@/data/mock'
+import type { CancelReason } from '@/types'
 
 function SpotContent({ spotId }: { spotId: string | undefined }) {
   const navigate = useNavigate()
-  const { spots, replies, sendReply, confirmReply, trips } = useAppStore()
+  const { spots, replies, sendReply, confirmReply, trips, checkIn, cancelTrip, getWaitlistPosition } = useAppStore()
   const [showConfirmAnim, setShowConfirmAnim] = useState(false)
+  const [showCancelModal, setShowCancelModal] = useState(false)
+  const [cancelReason, setCancelReason] = useState<CancelReason>('other')
+  const [cancelNote, setCancelNote] = useState('')
   const [, setTick] = useState(0)
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTick(t => t + 1)
+    }, 10000)
+    return () => clearInterval(interval)
+  }, [])
 
   const spot = spots.find(s => s.id === spotId)
   const lockCountdown = useCountdownShort(spot?.lockTime ?? new Date().toISOString())
   const startCountdown = useCountdown(spot?.startTime ?? new Date().toISOString())
-  const myReply = replies.find(r => r.spotId === spotId)
-  const myTrip = trips.find(t => t.spotId === spotId)
+  const myReply = replies.find(r => r.spotId === spotId && r.playerId === CURRENT_PLAYER.id)
+  const myTrip = trips.find(t => t.spotId === spotId && t.playerId === CURRENT_PLAYER.id)
   const isConfirmed = myTrip?.status === 'confirmed'
   const isPending = myTrip?.status === 'pending'
+  const isWaitlist = myTrip?.status === 'waitlist'
+  const isArrived = myTrip?.status === 'arrived'
+  const isCancelled = myTrip?.status === 'cancelled'
+  const isMissed = myTrip?.status === 'missed'
+
+  const waitlistPosition = useMemo(() => {
+    if (!spotId) return 0
+    return getWaitlistPosition(spotId, CURRENT_PLAYER.id)
+  }, [spotId, getWaitlistPosition, replies]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const travelPlan = useMemo(() => {
     if (!spot) return null
-    const departureTime = calculateDepartureTime(spot.distance, spot.startTime)
-    const arrivalTime = calculateArrivalTime(spot.distance)
-    const lateRisk = isAtRiskOfLate(spot.distance, spot.startTime)
-    const startDiff = new Date(spot.startTime).getTime() - Date.now()
-    const minutesToStart = Math.max(0, Math.floor(startDiff / 60000))
+    return getTravelPlan(spot.distance, spot.startTime)
+  }, [spot, startCountdown]) // eslint-disable-line react-hooks/exhaustive-deps
 
-    return {
-      departureTime,
-      arrivalTime,
-      lateRisk,
-      minutesToStart,
-      travelMinutes: Math.ceil((spot.distance / 30) * 60) + 10,
-    }
-  }, [spot])
+  const isLocking = spot ? isLockingSoon(spot.lockTime) : false
 
   if (!spot) {
     return (
@@ -56,11 +67,85 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
     setTimeout(() => setShowConfirmAnim(false), 2000)
   }
 
+  const handleCheckIn = () => {
+    checkIn(spot.id)
+    setTick(t => t + 1)
+  }
+
+  const handleCancel = () => {
+    cancelTrip(spot.id, cancelReason, cancelNote)
+    setShowCancelModal(false)
+    setTick(t => t + 1)
+  }
+
   const difficultyLabel = { easy: '简单', medium: '中等', hard: '烧脑' }[spot.difficulty]
   const difficultyColor = { easy: 'text-neon-green', medium: 'text-neon-orange', hard: 'text-neon-pink' }[spot.difficulty]
 
   const totalSlots = spot.playerCount.max
   const filledSlots = spot.currentPlayers.length
+
+  const cancelReasons: { value: CancelReason; label: string }[] = [
+    { value: 'traffic', label: '堵车，赶不到' },
+    { value: 'emergency', label: '临时有事' },
+    { value: 'changed_mind', label: '不想去了' },
+    { value: 'other', label: '其他原因' },
+  ]
+
+  const renderStatusBanner = () => {
+    if (isWaitlist) {
+      return (
+        <div className="mb-4 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30">
+          <div className="flex items-center gap-2">
+            <ListChecks size={16} className="text-yellow-400" />
+            <div>
+              <p className="text-sm font-bold text-yellow-400">候补中 · 第 {waitlistPosition} 位</p>
+              <p className="text-xs text-yellow-400/70">当前缺{spot.missingCount}人，有 {replies.filter(r => r.spotId === spot.id && r.status === 'pending').length} 人在抢</p>
+            </div>
+          </div>
+        </div>
+      )
+    }
+    if (isMissed) {
+      return (
+        <div className="mb-4 p-3 rounded-xl bg-neon-pink/10 border border-neon-pink/30">
+          <div className="flex items-center gap-2">
+            <XCircle size={16} className="text-neon-pink" />
+            <div>
+              <p className="text-sm font-bold text-neon-pink">已错过</p>
+              <p className="text-xs text-neon-pink/70">门店已确认其他玩家，下次手速快一点~</p>
+            </div>
+          </div>
+        </div>
+      )
+    }
+    if (isCancelled) {
+      return (
+        <div className="mb-4 p-3 rounded-xl bg-white/5 border border-white/10">
+          <div className="flex items-center gap-2">
+            <X size={16} className="text-white/40" />
+            <div>
+              <p className="text-sm font-bold text-white/60">已取消</p>
+              <p className="text-xs text-white/30">你已取消本次补位</p>
+            </div>
+          </div>
+        </div>
+      )
+    }
+    if (isArrived) {
+      return (
+        <div className="mb-4 p-3 rounded-xl bg-neon-green/10 border border-neon-green/30">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={16} className="text-neon-green" />
+            <div>
+              <p className="text-sm font-bold text-neon-green">已到店</p>
+              <p className="text-xs text-neon-green/70">打卡成功，祝你玩得愉快！</p>
+            </div>
+          </div>
+        </div>
+      )
+    }
+    return null
+  }
 
   return (
     <div className="min-h-screen bg-gradient-night pb-28">
@@ -88,6 +173,8 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
         </div>
 
         <div className="px-4 space-y-4 mt-2">
+          {renderStatusBanner()}
+
           <div className="flex gap-2 flex-wrap">
             {spot.genreTypes.map(g => (
               <span key={g} className="px-2.5 py-1 rounded-full text-xs font-medium bg-night-700 text-neon-orange border border-neon-orange/20">
@@ -242,6 +329,18 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
                 </div>
               </div>
 
+              {isLocking && (
+                <div className="mt-3 flex items-start gap-2 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30">
+                  <AlertTriangle size={14} className="text-yellow-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-bold text-yellow-400">即将锁车</p>
+                    <p className="text-[10px] text-yellow-400/70">
+                      距离锁车不足 15 分钟，请尽快出发
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {travelPlan.lateRisk.isLate && (
                 <div className="mt-3 flex items-start gap-2 p-3 rounded-xl bg-neon-orange/10 border border-neon-orange/30">
                   <AlertTriangle size={14} className="text-neon-orange flex-shrink-0 mt-0.5" />
@@ -259,18 +358,36 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
                   <Navigation size={16} />
                   导航到店
                 </button>
-                <button className="px-4 py-3 rounded-xl bg-night-800 text-white/50 text-xs active:scale-95 transition-transform">
-                  地图
+                <button
+                  onClick={handleCheckIn}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-neon-purple/20 text-neon-purple font-medium text-sm border border-neon-purple/30 active:scale-95 transition-transform"
+                >
+                  <MapPinned size={16} />
+                  到店打卡
                 </button>
               </div>
+
+              <button
+                onClick={() => setShowCancelModal(true)}
+                className="w-full mt-2 py-2 rounded-xl bg-night-800 text-white/30 text-xs font-medium active:scale-95 transition-transform"
+              >
+                临时取消
+              </button>
             </div>
           )}
 
-          {myReply && !isConfirmed && (
+          {myReply && !isConfirmed && !isArrived && !isCancelled && !isMissed && (
             <div className="glass rounded-2xl p-4 border border-neon-orange/20">
               <p className="text-xs text-white/40 mb-1">你已发送</p>
               <p className="text-sm text-neon-orange font-medium">「{myReply.label}」</p>
-              <p className="text-xs text-white/30 mt-1">等待门店确认中...</p>
+              <p className="text-xs text-white/30 mt-1">
+                {isWaitlist ? `候补中，第 ${waitlistPosition} 位` : '等待门店确认中...'}
+              </p>
+              {isWaitlist && (
+                <p className="text-[10px] text-yellow-400/50 mt-1">
+                  当前有 {replies.filter(r => r.spotId === spot.id && r.status === 'pending').length} 人在抢这 {spot.missingCount} 个位置
+                </p>
+              )}
               <div className="flex gap-2 mt-3">
                 <button
                   onClick={handleSimConfirm}
@@ -296,7 +413,7 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
         </div>
       </div>
 
-      {!isConfirmed && !isPending && (
+      {!isConfirmed && !isPending && !isWaitlist && !isArrived && !isCancelled && !isMissed && (
         <div className="fixed bottom-0 left-0 right-0 glass-strong p-4 safe-bottom z-50">
           <div className="max-w-md mx-auto">
             <p className="text-[10px] text-white/30 mb-2">快捷回复</p>
@@ -324,13 +441,18 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
         </div>
       )}
 
-      {isPending && !isConfirmed && (
+      {(isPending || isWaitlist) && !isConfirmed && !isArrived && !isCancelled && !isMissed && (
         <div className="fixed bottom-0 left-0 right-0 glass-strong p-4 safe-bottom z-50">
           <div className="max-w-md mx-auto">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-white/40">等待门店确认</p>
+                <p className="text-xs text-white/40">
+                  {isWaitlist ? '候补中' : '等待门店确认'}
+                </p>
                 <p className="text-sm text-white/70 font-medium mt-0.5">「{myReply?.label}」</p>
+                {isWaitlist && (
+                  <p className="text-[10px] text-yellow-400/50 mt-0.5">当前排名第 {waitlistPosition} 位</p>
+                )}
               </div>
               <button
                 onClick={handleSimConfirm}
@@ -349,6 +471,62 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
             <CheckCircle2 size={56} className="text-neon-green mx-auto mb-3" />
             <p className="text-lg font-bold text-white">确认成功！</p>
             <p className="text-sm text-white/50 mt-1">请准时到店，爽约将影响信用</p>
+          </div>
+        </div>
+      )}
+
+      {showCancelModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 animate-fade-in">
+          <div className="glass-strong rounded-3xl p-6 mx-4 max-w-md w-full animate-slide-up">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-white">取消行程</h3>
+              <button
+                onClick={() => setShowCancelModal(false)}
+                className="p-2 rounded-full bg-night-800"
+              >
+                <X size={16} className="text-white/50" />
+              </button>
+            </div>
+
+            <p className="text-xs text-white/40 mb-4">请选择取消原因，多次无故取消将影响信用评分</p>
+
+            <div className="space-y-2 mb-4">
+              {cancelReasons.map(reason => (
+                <button
+                  key={reason.value}
+                  onClick={() => setCancelReason(reason.value)}
+                  className={`w-full text-left px-4 py-3 rounded-xl text-sm transition-all ${
+                    cancelReason === reason.value
+                      ? 'bg-neon-orange/20 text-neon-orange border border-neon-orange/30'
+                      : 'bg-night-800 text-white/60'
+                  }`}
+                >
+                  {reason.label}
+                </button>
+              ))}
+            </div>
+
+            <textarea
+              value={cancelNote}
+              onChange={(e) => setCancelNote(e.target.value)}
+              placeholder="补充说明（选填）"
+              className="w-full px-4 py-3 rounded-xl bg-night-800 text-white/70 text-sm placeholder-white/20 resize-none h-20 mb-4"
+            />
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowCancelModal(false)}
+                className="flex-1 py-3 rounded-xl bg-night-800 text-white/50 text-sm font-medium"
+              >
+                我再想想
+              </button>
+              <button
+                onClick={handleCancel}
+                className="flex-1 py-3 rounded-xl bg-neon-pink/20 text-neon-pink text-sm font-medium border border-neon-pink/30"
+              >
+                确认取消
+              </button>
+            </div>
           </div>
         </div>
       )}

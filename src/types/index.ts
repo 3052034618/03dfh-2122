@@ -2,8 +2,10 @@ export type GenreType = '欢乐' | '恐怖' | '情感' | '硬核' | '阵营' | '
 export type DurationRange = '3h以内' | '3-5h' | '5-7h' | '7h+'
 export type Difficulty = 'easy' | 'medium' | 'hard'
 export type Gender = 'male' | 'female'
-export type TripStatus = 'confirmed' | 'pending' | 'completed' | 'noshow'
+export type TripStatus = 'confirmed' | 'pending' | 'completed' | 'noshow' | 'waitlist' | 'missed' | 'cancelled' | 'arrived'
 export type ReplyType = 'confirm' | 'pending' | 'conditional'
+export type ReplyStatus = 'pending' | 'confirmed' | 'rejected' | 'waitlisted'
+export type CancelReason = 'traffic' | 'emergency' | 'changed_mind' | 'other'
 
 export interface PlayerPreference {
   districts: string[]
@@ -42,6 +44,7 @@ export interface GameSpot {
   distance: number
   district: string
   acceptCrossGender: boolean
+  isFilled: boolean
 }
 
 export interface QuickReply {
@@ -55,13 +58,45 @@ export interface TripRecord {
   status: TripStatus
   confirmedAt: string
   replyType: ReplyType
+  playerId: string
+  playerName: string
+  playerGender: Gender
+  waitlistPosition?: number
+  cancelledAt?: string
+  cancelReason?: CancelReason
+  cancelNote?: string
+  arrivedAt?: string
+  noshowCount?: number
 }
 
 export interface ReplyRecord {
+  id: string
   spotId: string
   replyId: string
   label: string
   type: ReplyType
   sentAt: string
-  confirmed: boolean
+  status: ReplyStatus
+  playerId: string
+  playerName: string
+  playerGender: Gender
+  processedAt?: string
+}
+
+export interface FulfillmentRecord {
+  spotId: string
+  playerId: string
+  checkedIn: boolean
+  checkedInAt?: string
+  cancelled: boolean
+  cancelledAt?: string
+  cancelReason?: CancelReason
+  cancelNote?: string
+  isNoshow: boolean
+}
+
+export interface StoreQueueItem {
+  reply: ReplyRecord
+  spot: GameSpot
+  receivedAt: string
 }

@@ -4,6 +4,7 @@ import Channel from "@/pages/Channel"
 import SpotDetail from "@/pages/SpotDetail"
 import Trips from "@/pages/Trips"
 import Publish from "@/pages/Publish"
+import StoreQueue from "@/pages/StoreQueue"
 import BottomNav from "@/components/BottomNav"
 import { useAppStore } from "@/store"
 
@@ -19,6 +20,7 @@ function AppRoutes() {
         <Route path="/spot/:id" element={<SpotDetail />} />
         <Route path="/trips" element={<Trips />} />
         <Route path="/publish" element={<Publish />} />
+        <Route path="/store-queue" element={<StoreQueue />} />
       </Routes>
       <BottomNav />
     </div>

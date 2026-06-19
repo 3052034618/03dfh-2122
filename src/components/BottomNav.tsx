@@ -1,9 +1,10 @@
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Flame, User, Settings, Plus } from 'lucide-react'
+import { Flame, User, Settings, Plus, Store } from 'lucide-react'
 
 const NAV_ITEMS = [
   { path: '/channel', label: '捡漏', icon: Flame },
   { path: '/trips', label: '行程', icon: User },
+  { path: '/store-queue', label: '门店', icon: Store },
   { path: '/publish', label: '发布', icon: Plus },
   { path: '/setup', label: '偏好', icon: Settings },
 ]

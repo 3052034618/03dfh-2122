@@ -1,4 +1,18 @@
-import type { GameSpot, QuickReply, GenreType } from '@/types'
+import type { GameSpot, QuickReply, GenreType, PlayerSlot } from '@/types'
+
+export const CURRENT_PLAYER = {
+  id: 'me',
+  name: '我',
+  gender: 'male' as const,
+}
+
+export const MOCK_PLAYERS: PlayerSlot[] = [
+  { id: 'u1', name: '小明', avatar: '', gender: 'male', isConfirmed: false },
+  { id: 'u2', name: '小红', avatar: '', gender: 'female', isConfirmed: false },
+  { id: 'u3', name: '阿强', avatar: '', gender: 'male', isConfirmed: false },
+  { id: 'u4', name: '小美', avatar: '', gender: 'female', isConfirmed: false },
+  { id: 'u5', name: '大伟', avatar: '', gender: 'male', isConfirmed: false },
+]
 
 export const GENRE_TYPES: GenreType[] = ['欢乐', '恐怖', '情感', '硬核', '阵营', '机制', '还原', '其他']
 
@@ -56,6 +70,7 @@ export const MOCK_SPOTS: GameSpot[] = [
     distance: 3.2,
     district: '三里屯',
     acceptCrossGender: true,
+    isFilled: false,
   },
   {
     id: 's2',
@@ -81,6 +96,7 @@ export const MOCK_SPOTS: GameSpot[] = [
     distance: 1.8,
     district: '望京',
     acceptCrossGender: true,
+    isFilled: false,
   },
   {
     id: 's3',
@@ -108,6 +124,7 @@ export const MOCK_SPOTS: GameSpot[] = [
     distance: 5.6,
     district: '国贸',
     acceptCrossGender: false,
+    isFilled: false,
   },
   {
     id: 's4',
@@ -134,6 +151,7 @@ export const MOCK_SPOTS: GameSpot[] = [
     distance: 2.1,
     district: '三里屯',
     acceptCrossGender: true,
+    isFilled: false,
   },
   {
     id: 's5',
@@ -159,6 +177,7 @@ export const MOCK_SPOTS: GameSpot[] = [
     distance: 8.3,
     district: '中关村',
     acceptCrossGender: true,
+    isFilled: false,
   },
   {
     id: 's6',
@@ -186,5 +205,6 @@ export const MOCK_SPOTS: GameSpot[] = [
     distance: 1.5,
     district: '合生汇',
     acceptCrossGender: true,
+    isFilled: false,
   },
 ]
