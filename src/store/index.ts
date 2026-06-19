@@ -42,6 +42,34 @@ const savePreference = (pref: PlayerPreference) => {
   } catch { /* ignore */ }
 }
 
+const loadTrips = (): TripRecord[] => {
+  try {
+    const saved = localStorage.getItem('jlq-trips')
+    if (saved) return JSON.parse(saved)
+  } catch { /* ignore */ }
+  return []
+}
+
+const saveTrips = (trips: TripRecord[]) => {
+  try {
+    localStorage.setItem('jlq-trips', JSON.stringify(trips))
+  } catch { /* ignore */ }
+}
+
+const loadReplies = (): ReplyRecord[] => {
+  try {
+    const saved = localStorage.getItem('jlq-replies')
+    if (saved) return JSON.parse(saved)
+  } catch { /* ignore */ }
+  return []
+}
+
+const saveReplies = (replies: ReplyRecord[]) => {
+  try {
+    localStorage.setItem('jlq-replies', JSON.stringify(replies))
+  } catch { /* ignore */ }
+}
+
 const checkHasPreference = (pref: PlayerPreference): boolean => {
   return pref.districts.length > 0 || pref.genreTypes.length > 0 || pref.durationRange.length > 0
 }
@@ -49,8 +77,8 @@ const checkHasPreference = (pref: PlayerPreference): boolean => {
 export const useAppStore = create<AppState>((set, get) => ({
   preference: loadPreference(),
   spots: MOCK_SPOTS,
-  trips: [],
-  replies: [],
+  trips: loadTrips(),
+  replies: loadReplies(),
   activeGenreFilter: null,
   hasPreference: checkHasPreference(loadPreference()),
 
@@ -74,30 +102,50 @@ export const useAppStore = create<AppState>((set, get) => ({
       confirmed: false,
     }
     const existing = get().replies.find(r => r.spotId === spotId)
-    if (existing) {
-      set({ replies: get().replies.map(r => r.spotId === spotId ? reply : r) })
-    } else {
-      set({ replies: [...get().replies, reply] })
+    const newReplies = existing
+      ? get().replies.map(r => r.spotId === spotId ? reply : r)
+      : [...get().replies, reply]
+    saveReplies(newReplies)
+    set({ replies: newReplies })
+
+    const trip: TripRecord = {
+      spotId,
+      status: 'pending',
+      confirmedAt: new Date().toISOString(),
+      replyType: type,
     }
-    if (type === 'confirm') {
-      const trip: TripRecord = {
-        spotId,
-        status: 'pending',
-        confirmedAt: new Date().toISOString(),
-        replyType: type,
-      }
-      const existingTrip = get().trips.find(t => t.spotId === spotId)
-      if (!existingTrip) {
-        set({ trips: [...get().trips, trip] })
-      }
+    const existingTrip = get().trips.find(t => t.spotId === spotId)
+    if (!existingTrip) {
+      const newTrips = [...get().trips, trip]
+      saveTrips(newTrips)
+      set({ trips: newTrips })
     }
   },
 
   confirmReply: (spotId) => {
-    set({
-      replies: get().replies.map(r => r.spotId === spotId ? { ...r, confirmed: true } : r),
-      trips: get().trips.map(t => t.spotId === spotId ? { ...t, status: 'confirmed' as const } : t),
-    })
+    const existingReply = get().replies.find(r => r.spotId === spotId)
+
+    const newReplies = get().replies.map(r =>
+      r.spotId === spotId ? { ...r, confirmed: true } : r
+    )
+    saveReplies(newReplies)
+
+    const existingTrip = get().trips.find(t => t.spotId === spotId)
+    let newTrips
+    if (existingTrip) {
+      newTrips = get().trips.map(t =>
+        t.spotId === spotId ? { ...t, status: 'confirmed' as const } : t
+      )
+    } else {
+      newTrips = [...get().trips, {
+        spotId,
+        status: 'confirmed',
+        confirmedAt: new Date().toISOString(),
+        replyType: existingReply?.type ?? 'confirm',
+      }]
+    }
+    saveTrips(newTrips)
+    set({ replies: newReplies, trips: newTrips })
   },
 
   resetPreference: () => {

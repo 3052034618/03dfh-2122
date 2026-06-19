@@ -1,14 +1,16 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, MapPin, Clock, Users, Flame, ShieldCheck, BadgeCheck, Navigation, Star, Send, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, MapPin, Clock, Users, Flame, ShieldCheck, BadgeCheck, Navigation, Star, Send, CheckCircle2, AlertTriangle, Timer, Car, DoorOpen } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { QUICK_REPLIES } from '@/data/mock'
 import { useCountdownShort, useCountdown } from '@/hooks/useCountdown'
+import { formatTime, calculateDepartureTime, calculateArrivalTime, isAtRiskOfLate } from '@/utils/filter'
 
 function SpotContent({ spotId }: { spotId: string | undefined }) {
   const navigate = useNavigate()
   const { spots, replies, sendReply, confirmReply, trips } = useAppStore()
   const [showConfirmAnim, setShowConfirmAnim] = useState(false)
+  const [, setTick] = useState(0)
 
   const spot = spots.find(s => s.id === spotId)
   const lockCountdown = useCountdownShort(spot?.lockTime ?? new Date().toISOString())
@@ -16,6 +18,24 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
   const myReply = replies.find(r => r.spotId === spotId)
   const myTrip = trips.find(t => t.spotId === spotId)
   const isConfirmed = myTrip?.status === 'confirmed'
+  const isPending = myTrip?.status === 'pending'
+
+  const travelPlan = useMemo(() => {
+    if (!spot) return null
+    const departureTime = calculateDepartureTime(spot.distance, spot.startTime)
+    const arrivalTime = calculateArrivalTime(spot.distance)
+    const lateRisk = isAtRiskOfLate(spot.distance, spot.startTime)
+    const startDiff = new Date(spot.startTime).getTime() - Date.now()
+    const minutesToStart = Math.max(0, Math.floor(startDiff / 60000))
+
+    return {
+      departureTime,
+      arrivalTime,
+      lateRisk,
+      minutesToStart,
+      travelMinutes: Math.ceil((spot.distance / 30) * 60) + 10,
+    }
+  }, [spot])
 
   if (!spot) {
     return (
@@ -27,6 +47,7 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
 
   const handleReply = (replyId: string, label: string, type: 'confirm' | 'pending' | 'conditional') => {
     sendReply(spot.id, replyId, label, type)
+    setTick(t => t + 1)
   }
 
   const handleSimConfirm = () => {
@@ -97,9 +118,9 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
               />
             </div>
             <div className="flex justify-between mt-1.5">
-              <span className="text-[10px] text-white/30">最晚锁车时间</span>
+              <span className="text-[10px] text-white/30">最晚锁车时间 {formatTime(spot.lockTime)}</span>
               <span className="text-[10px] text-white/30">
-                开本倒计时 {startCountdown.isExpired ? '已开场' :
+                开场倒计时 {startCountdown.isExpired ? '已开场' :
                   `${startCountdown.hours > 0 ? `${startCountdown.hours}h` : ''}${startCountdown.minutes}m`
                 }
               </span>
@@ -179,16 +200,69 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
             </div>
           </div>
 
-          {isConfirmed && (
+          {isConfirmed && travelPlan && (
             <div className="glass rounded-2xl p-4 neon-border-green">
-              <div className="flex items-center gap-2 mb-2">
+              <div className="flex items-center gap-2 mb-3">
                 <CheckCircle2 size={16} className="text-neon-green" />
-                <span className="text-sm font-bold text-neon-green">门店已确认</span>
+                <span className="text-sm font-bold text-neon-green">门店已确认 · 到店计划</span>
               </div>
-              <button className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-neon-green/20 text-neon-green font-medium text-sm">
-                <Navigation size={16} />
-                导航到店 · 预计{Math.round(spot.distance / 0.5)}分钟
-              </button>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between py-2 px-3 rounded-xl bg-night-800/50">
+                  <div className="flex items-center gap-2 text-xs text-white/60">
+                    <Timer size={12} className="text-neon-orange" />
+                    <span>距离开场</span>
+                  </div>
+                  <span className="font-mono text-sm font-bold text-white">
+                    {travelPlan.minutesToStart > 60
+                      ? `${Math.floor(travelPlan.minutesToStart / 60)}h ${travelPlan.minutesToStart % 60}m`
+                      : `${travelPlan.minutesToStart} 分钟`
+                    }
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between py-2 px-3 rounded-xl bg-night-800/50">
+                  <div className="flex items-center gap-2 text-xs text-white/60">
+                    <Car size={12} className="text-neon-purple" />
+                    <span>预计出发</span>
+                  </div>
+                  <span className="font-mono text-sm font-bold text-white">
+                    {formatTime(travelPlan.departureTime.toISOString())}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between py-2 px-3 rounded-xl bg-night-800/50">
+                  <div className="flex items-center gap-2 text-xs text-white/60">
+                    <DoorOpen size={12} className="text-neon-green" />
+                    <span>预计到店</span>
+                  </div>
+                  <span className="font-mono text-sm font-bold text-white">
+                    {formatTime(travelPlan.arrivalTime.toISOString())}
+                  </span>
+                </div>
+              </div>
+
+              {travelPlan.lateRisk.isLate && (
+                <div className="mt-3 flex items-start gap-2 p-3 rounded-xl bg-neon-orange/10 border border-neon-orange/30">
+                  <AlertTriangle size={14} className="text-neon-orange flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-bold text-neon-orange">迟到风险警告</p>
+                    <p className="text-[10px] text-neon-orange/70 mt-0.5">
+                      路程约需 {travelPlan.lateRisk.minutesNeeded} 分钟，时间非常紧张，建议立即出发
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2 mt-3">
+                <button className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-neon-green/20 text-neon-green font-medium text-sm active:scale-95 transition-transform">
+                  <Navigation size={16} />
+                  导航到店
+                </button>
+                <button className="px-4 py-3 rounded-xl bg-night-800 text-white/50 text-xs active:scale-95 transition-transform">
+                  地图
+                </button>
+              </div>
             </div>
           )}
 
@@ -197,20 +271,35 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
               <p className="text-xs text-white/40 mb-1">你已发送</p>
               <p className="text-sm text-neon-orange font-medium">「{myReply.label}」</p>
               <p className="text-xs text-white/30 mt-1">等待门店确认中...</p>
-              <button
-                onClick={handleSimConfirm}
-                className="mt-2 px-3 py-1.5 rounded-lg bg-neon-green/10 text-neon-green text-xs font-medium"
-              >
-                模拟门店确认
-              </button>
+              <div className="flex gap-2 mt-3">
+                <button
+                  onClick={handleSimConfirm}
+                  className="flex-1 px-3 py-2 rounded-lg bg-neon-green/10 text-neon-green text-xs font-medium"
+                >
+                  模拟门店确认
+                </button>
+                <button
+                  onClick={() => {
+                    const replies = QUICK_REPLIES
+                    const otherReply = replies.find(r => r.id !== myReply.replyId)
+                    if (otherReply) {
+                      sendReply(spot.id, otherReply.id, otherReply.label, otherReply.type)
+                    }
+                  }}
+                  className="px-3 py-2 rounded-lg bg-night-700 text-white/40 text-xs font-medium"
+                >
+                  更换回复
+                </button>
+              </div>
             </div>
           )}
         </div>
       </div>
 
-      {!isConfirmed && (
+      {!isConfirmed && !isPending && (
         <div className="fixed bottom-0 left-0 right-0 glass-strong p-4 safe-bottom z-50">
           <div className="max-w-md mx-auto">
+            <p className="text-[10px] text-white/30 mb-2">快捷回复</p>
             <div className="flex gap-2 overflow-x-auto scrollbar-hide">
               {QUICK_REPLIES.map(reply => {
                 const isActive = myReply?.replyId === reply.id
@@ -230,6 +319,25 @@ function SpotContent({ spotId }: { spotId: string | undefined }) {
                   </button>
                 )
               })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isPending && !isConfirmed && (
+        <div className="fixed bottom-0 left-0 right-0 glass-strong p-4 safe-bottom z-50">
+          <div className="max-w-md mx-auto">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-white/40">等待门店确认</p>
+                <p className="text-sm text-white/70 font-medium mt-0.5">「{myReply?.label}」</p>
+              </div>
+              <button
+                onClick={handleSimConfirm}
+                className="px-4 py-2 rounded-lg bg-neon-green/10 text-neon-green text-xs font-medium"
+              >
+                模拟确认
+              </button>
             </div>
           </div>
         </div>
