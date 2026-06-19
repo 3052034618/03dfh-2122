@@ -23,6 +23,7 @@ interface AppState {
   getWaitlistPosition: (spotId: string, playerId: string) => number
   simulateOtherReplies: (spotId: string) => void
   resetPreference: () => void
+  checkNoshowTrips: () => void
 }
 
 const DEFAULT_PREFERENCE: PlayerPreference = {
@@ -180,29 +181,36 @@ export const useAppStore = create<AppState>((set, get) => ({
     const spot = get().spots.find(s => s.id === spotId)
     if (!reply || !spot) return
 
+    const pendingReplies = get().replies
+      .filter(r => r.spotId === spotId && r.status === 'pending')
+      .sort((a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime())
+
     const newReplies = get().replies.map(r => {
       if (r.id === replyId) {
         return { ...r, status: 'confirmed' as const, processedAt: now }
       }
       if (r.spotId === spotId && r.status === 'pending') {
-        return { ...r, status: 'waitlisted' as const }
-      }
-      if (r.spotId === spotId && r.id !== replyId && r.status === 'pending') {
-        return { ...r, status: 'waitlisted' as const }
+        const waitlistIdx = pendingReplies.findIndex(p => p.id === r.id)
+        if (waitlistIdx >= 0) {
+          return { ...r, status: 'waitlisted' as const }
+        }
       }
       return r
     })
     saveReplies(newReplies)
 
+    const waitlistedReplies = newReplies
+      .filter(r => r.spotId === spotId && r.status === 'waitlisted')
+      .sort((a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime())
+
     const newTrips = get().trips.map(t => {
       if (t.spotId === spotId && t.playerId === reply.playerId) {
         return { ...t, status: 'confirmed' as const, confirmedAt: now }
       }
-      if (t.spotId === spotId && t.status === 'pending') {
-        const pendingRepliesForSpot = newReplies.filter(r => r.spotId === spotId && r.status === 'pending')
-        const waitlistPos = pendingRepliesForSpot.findIndex(r => r.playerId === t.playerId)
-        if (waitlistPos >= 0) {
-          return { ...t, status: 'waitlist' as const, waitlistPosition: waitlistPos + 1 }
+      if (t.spotId === spotId && (t.status === 'pending' || t.status === 'waitlist')) {
+        const waitlistIdx = waitlistedReplies.findIndex(r => r.playerId === t.playerId)
+        if (waitlistIdx >= 0) {
+          return { ...t, status: 'waitlist' as const, waitlistPosition: waitlistIdx + 1 }
         }
       }
       return t
@@ -243,19 +251,63 @@ export const useAppStore = create<AppState>((set, get) => ({
     const reply = get().replies.find(r => r.id === replyId)
     if (!reply) return
 
+    const wasConfirmed = reply.status === 'confirmed'
+
     const newReplies = get().replies.map(r =>
       r.id === replyId ? { ...r, status: 'rejected' as const, processedAt: now } : r
     )
+
+    if (wasConfirmed) {
+      const waitlistedReplies = get().replies
+        .filter(r => r.spotId === spotId && r.status === 'waitlisted')
+        .sort((a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime())
+      if (waitlistedReplies.length > 0) {
+        const firstWaitlisted = waitlistedReplies[0]
+        const idx = newReplies.findIndex(r => r.id === firstWaitlisted.id)
+        if (idx >= 0) {
+          newReplies[idx] = { ...newReplies[idx], status: 'pending' as const }
+        }
+      }
+    }
     saveReplies(newReplies)
 
-    const newTrips = get().trips.map(t =>
-      t.spotId === spotId && t.playerId === reply.playerId
-        ? { ...t, status: 'missed' as const }
-        : t
-    )
+    const newTrips = get().trips.map(t => {
+      if (t.spotId === spotId && t.playerId === reply.playerId) {
+        return { ...t, status: 'missed' as const }
+      }
+      if (wasConfirmed && t.spotId === spotId && t.status === 'waitlist') {
+        const waitlistedForTrips = newReplies
+          .filter(r => r.spotId === spotId && r.status === 'waitlisted')
+          .sort((a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime())
+        const waitlistIdx = waitlistedForTrips.findIndex(r => r.playerId === t.playerId)
+        if (waitlistIdx >= 0) {
+          return { ...t, status: 'waitlist' as const, waitlistPosition: waitlistIdx + 1 }
+        }
+        const pendingIdx = newReplies.findIndex(r => r.spotId === spotId && r.status === 'pending' && r.playerId === t.playerId)
+        if (pendingIdx >= 0) {
+          return { ...t, status: 'pending' as const, waitlistPosition: undefined }
+        }
+      }
+      return t
+    })
     saveTrips(newTrips)
 
-    set({ replies: newReplies, trips: newTrips })
+    const newSpots = get().spots.map(s => {
+      if (s.id !== spotId) return s
+      let newMissingCount = s.missingCount
+      if (wasConfirmed) {
+        newMissingCount = s.missingCount + 1
+      }
+      return {
+        ...s,
+        missingCount: newMissingCount,
+        isFilled: newMissingCount <= 0,
+        currentPlayers: s.currentPlayers.filter(p => p.id !== reply.playerId),
+      }
+    })
+    saveSpots(newSpots)
+
+    set({ replies: newReplies, trips: newTrips, spots: newSpots })
   },
 
   checkIn: (spotId) => {
@@ -369,6 +421,34 @@ export const useAppStore = create<AppState>((set, get) => ({
   resetPreference: () => {
     savePreference(DEFAULT_PREFERENCE)
     set({ preference: DEFAULT_PREFERENCE, hasPreference: false })
+  },
+
+  checkNoshowTrips: () => {
+    const now = Date.now()
+    const NOSHOW_GRACE_MINUTES = 30
+    let hasChanges = false
+
+    const newTrips = get().trips.map(trip => {
+      if (trip.status !== 'confirmed' && trip.status !== 'pending') return trip
+      const spot = get().spots.find(s => s.id === trip.spotId)
+      if (!spot) return trip
+      const startTime = new Date(spot.startTime).getTime()
+      const graceEnd = startTime + NOSHOW_GRACE_MINUTES * 60 * 1000
+      if (now > graceEnd && trip.status === 'confirmed') {
+        hasChanges = true
+        return { ...trip, status: 'noshow' as const, noshowCount: (trip.noshowCount || 0) + 1 }
+      }
+      if (now > startTime && trip.status === 'pending') {
+        hasChanges = true
+        return { ...trip, status: 'missed' as const }
+      }
+      return trip
+    })
+
+    if (hasChanges) {
+      saveTrips(newTrips)
+      set({ trips: newTrips })
+    }
   },
 }))
 

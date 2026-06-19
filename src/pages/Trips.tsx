@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useState, useMemo, useEffect } from 'react'
-import { Navigation, Clock, AlertTriangle, CheckCircle2, MapPin, Flame, Timer, Car, DoorOpen, XCircle, Trash2, MapPinned, X, ListChecks } from 'lucide-react'
+import { Navigation, Clock, AlertTriangle, CheckCircle2, MapPin, Flame, Timer, Car, DoorOpen, XCircle, Trash2, MapPinned, X, ListChecks, Lock, Zap } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { useCountdownShort, useCountdown } from '@/hooks/useCountdown'
 import { formatTime, getTravelPlan, isLockingSoon, isStartingSoon } from '@/utils/filter'
@@ -9,19 +9,21 @@ import type { GameSpot, TripRecord, CancelReason } from '@/types'
 
 export default function Trips() {
   const navigate = useNavigate()
-  const { trips, spots, replies, checkIn, cancelTrip, removeTrip } = useAppStore()
-  const [, setTick] = useState(0)
+  const { trips, spots, replies, checkIn, cancelTrip, removeTrip, checkNoshowTrips } = useAppStore()
   const [showCancelModal, setShowCancelModal] = useState(false)
   const [cancelSpotId, setCancelSpotId] = useState<string | null>(null)
   const [cancelReason, setCancelReason] = useState<CancelReason>('other')
   const [cancelNote, setCancelNote] = useState('')
+  const [, setTick] = useState(0)
 
   useEffect(() => {
+    checkNoshowTrips()
     const interval = setInterval(() => {
+      checkNoshowTrips()
       setTick(t => t + 1)
     }, 10000)
     return () => clearInterval(interval)
-  }, [])
+  }, [checkNoshowTrips])
 
   const tripSpots = useMemo(() => {
     return trips
@@ -40,11 +42,26 @@ export default function Trips() {
   }, [trips, spots, replies])
 
   const activeTrips = tripSpots.filter(t => ['confirmed', 'pending', 'waitlist', 'arrived'].includes(t.trip.status))
-  const urgentCount = activeTrips.filter(t => {
-    if (!t.spot) return false
-    const diff = new Date(t.spot.startTime).getTime() - Date.now()
-    return diff < 30 * 60 * 1000 && diff > 0 && t.trip.status !== 'arrived'
-  }).length
+
+  const urgentTrips = useMemo(() => {
+    return activeTrips
+      .filter(t => {
+        if (!t.spot) return false
+        if (t.trip.status === 'arrived') return false
+        const travelPlan = getTravelPlan(t.spot.distance, t.spot.startTime)
+        const isLocking = isLockingSoon(t.spot.lockTime)
+        const isLate = travelPlan.lateRisk.isLate
+        const isStarting = isStartingSoon(t.spot.startTime)
+        return isLocking || isLate || isStarting
+      })
+      .sort((a, b) => {
+        const timeA = new Date(a.spot!.startTime).getTime()
+        const timeB = new Date(b.spot!.startTime).getTime()
+        return timeA - timeB
+      })
+  }, [activeTrips, setTick]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const urgentCount = urgentTrips.length
 
   const noshowCount = tripSpots.filter(t => t.trip.status === 'noshow').length
   const cancelledCount = tripSpots.filter(t => t.trip.status === 'cancelled').length
@@ -71,44 +88,68 @@ export default function Trips() {
     setShowCancelModal(true)
   }
 
+  const getTopWarningInfo = () => {
+    if (urgentTrips.length === 0) return null
+    const topTrip = urgentTrips[0]
+    if (!topTrip.spot) return null
+
+    const travelPlan = getTravelPlan(topTrip.spot.distance, topTrip.spot.startTime)
+    const isLocking = isLockingSoon(topTrip.spot.lockTime)
+    const isLate = travelPlan.lateRisk.isLate
+
+    let type: 'lock' | 'late' | 'start' = 'start'
+    let title = ''
+    let desc = ''
+
+    if (isLate && topTrip.trip.status === 'confirmed') {
+      type = 'late'
+      title = '迟到风险警告'
+      desc = `「${topTrip.spot.scriptName}」路程约需 ${travelPlan.travelMinutes} 分钟，可能赶不上开场`
+    } else if (isLocking) {
+      type = 'lock'
+      title = '即将锁车'
+      desc = `「${topTrip.spot.scriptName}」距离锁车不足 15 分钟，请尽快确认出发`
+    } else {
+      type = 'start'
+      title = '即将开场'
+      desc = `「${topTrip.spot.scriptName}」马上就要开场了`
+    }
+
+    return { type, title, desc, spotId: topTrip.spot.id }
+  }
+
+  const warningInfo = getTopWarningInfo()
+
   const renderTopWarning = () => {
-    if (urgentCount === 0) return null
+    if (!warningInfo) return null
 
-    const urgentTrip = activeTrips.find(t => {
-      if (!t.spot) return false
-      const diff = new Date(t.spot.startTime).getTime() - Date.now()
-      return diff < 30 * 60 * 1000 && diff > 0
-    })
-
-    if (!urgentTrip || !urgentTrip.spot) return null
-
-    const isLocking = isLockingSoon(urgentTrip.spot.lockTime)
-    const travelPlan = getTravelPlan(urgentTrip.spot.distance, urgentTrip.spot.startTime)
+    const colorMap = {
+      late: { bg: 'bg-neon-pink/10', border: 'border-neon-pink/30', text: 'text-neon-pink', icon: AlertTriangle },
+      lock: { bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', text: 'text-yellow-400', icon: Lock },
+      start: { bg: 'bg-neon-orange/10', border: 'border-neon-orange/30', text: 'text-neon-orange', icon: Zap },
+    }
+    const config = colorMap[warningInfo.type]
+    const Icon = config.icon
 
     return (
-      <div className="mb-4 p-4 rounded-2xl bg-neon-orange/10 border border-neon-orange/30">
-        <div className="flex items-start gap-2">
-          <AlertTriangle size={18} className="text-neon-orange flex-shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <p className="text-sm font-bold text-neon-orange">
-              {isLocking ? '锁车提醒' : '到店提醒'}
-            </p>
-            <p className="text-xs text-neon-orange/70 mt-0.5">
-              「{urgentTrip.spot.scriptName}」
-              {isLocking
-                ? ' 距离锁车不足 15 分钟，请尽快确认'
-                : travelPlan.lateRisk.isLate
-                  ? ` 路程需 ${travelPlan.travelMinutes} 分钟，可能迟到`
-                  : ' 即将开场，请注意出发时间'
-              }
-            </p>
-            <button
-              onClick={() => navigate(`/spot/${urgentTrip.spot.id}`)}
-              className="mt-2 px-3 py-1.5 rounded-lg bg-neon-orange/20 text-neon-orange text-xs font-medium"
-            >
-              查看详情
-            </button>
+      <div
+        onClick={() => navigate(`/spot/${warningInfo.spotId}`)}
+        className={`mb-4 p-4 rounded-2xl ${config.bg} border ${config.border} cursor-pointer active:scale-[0.98] transition-transform`}
+      >
+        <div className="flex items-start gap-3">
+          <div className={`p-1.5 rounded-full ${config.bg}`}>
+            <Icon size={18} className={config.text} />
           </div>
+          <div className="flex-1">
+            <p className={`text-sm font-bold ${config.text}`}>
+              {warningInfo.title}
+              {urgentCount > 1 && <span className="ml-2 text-xs opacity-70">还有 {urgentCount - 1} 个</span>}
+            </p>
+            <p className={`text-xs ${config.text} opacity-70 mt-0.5`}>
+              {warningInfo.desc}
+            </p>
+          </div>
+          <span className={`text-xs ${config.text} opacity-60`}>查看 ›</span>
         </div>
       </div>
     )
@@ -168,10 +209,14 @@ export default function Trips() {
           <div className="mt-6 p-4 rounded-2xl glass border border-neon-pink/20">
             <div className="flex items-start gap-2">
               <XCircle size={18} className="text-neon-pink flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-bold text-neon-pink">爽约与取消记录</p>
+              <div className="flex-1">
+                <p className="text-sm font-bold text-neon-pink">信用风险区</p>
                 <p className="text-xs text-neon-pink/60 mt-0.5">
-                  历史爽约 {noshowCount} 次，取消 {cancelledCount} 次，多次无故取消将影响信用
+                  历史爽约 <span className="font-bold">{noshowCount}</span> 次，
+                  取消 <span className="font-bold">{cancelledCount}</span> 次
+                </p>
+                <p className="text-[10px] text-neon-pink/40 mt-1">
+                  多次无故爽约将影响信用评分，无法参与热门捡漏
                 </p>
               </div>
             </div>
@@ -256,15 +301,15 @@ function TripCard({ spot, trip, replyLabel, onCheckIn, onCancel, onRemove }: {
   const isCancelled = trip.status === 'cancelled'
   const isMissed = trip.status === 'missed'
   const isNoshow = trip.status === 'noshow'
-  const isUrgent = lockCountdown.isUrgent && !lockCountdown.isExpired
-  const hasExpired = lockCountdown.isExpired
+  const isCompleted = trip.status === 'completed'
+  const hasExpired = startCountdown.isExpired
 
   const travelPlan = useMemo(() => {
     return getTravelPlan(spot.distance, spot.startTime)
   }, [spot, startCountdown]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const isLocking = isLockingSoon(spot.lockTime)
-  const isStarting = isStartingSoon(spot.startTime)
+  const isLateRisk = travelPlan.lateRisk.isLate
 
   const statusConfig = {
     confirmed: { color: 'border-l-neon-green', label: '已确认', icon: CheckCircle2, textColor: 'text-neon-green' },
@@ -277,26 +322,27 @@ function TripCard({ spot, trip, replyLabel, onCheckIn, onCancel, onRemove }: {
     missed: { color: 'border-l-neon-pink', label: '已错过', icon: XCircle, textColor: 'text-neon-pink' },
   }
 
-  const config = statusConfig[trip.status]
+  const config = statusConfig[trip.status] || statusConfig.pending
   const StatusIcon = config.icon
 
   const renderRiskBadge = () => {
     if (!isConfirmed && !isWaitlist) return null
-    if (travelPlan.lateRisk.isLate) {
+    if (isNoshow || isArrived || isCancelled) return null
+    if (isLateRisk && isConfirmed) {
       return (
-        <div className="absolute top-0 right-0 px-2 py-0.5 bg-neon-orange text-white text-[10px] font-bold rounded-bl-lg animate-glow-breathe">
+        <div className="absolute top-0 right-0 px-2 py-0.5 bg-neon-pink text-white text-[10px] font-bold rounded-bl-lg animate-glow-breathe">
           高迟到风险
         </div>
       )
     }
-    if (isLocking) {
+    if (isLocking && isConfirmed) {
       return (
         <div className="absolute top-0 right-0 px-2 py-0.5 bg-yellow-500 text-white text-[10px] font-bold rounded-bl-lg animate-glow-breathe">
           即将锁车
         </div>
       )
     }
-    if (isStarting) {
+    if (travelPlan.minutesToStart < 30 && isConfirmed && !isArrived) {
       return (
         <div className="absolute top-0 right-0 px-2 py-0.5 bg-neon-orange text-white text-[10px] font-bold rounded-bl-lg animate-glow-breathe">
           即将开场
@@ -304,6 +350,23 @@ function TripCard({ spot, trip, replyLabel, onCheckIn, onCancel, onRemove }: {
       )
     }
     return null
+  }
+
+  const renderNoShowNote = () => {
+    if (!isNoshow) return null
+    return (
+      <div className="mt-3 pt-3 border-t border-white/5">
+        <div className="flex items-start gap-1.5 p-2 rounded-lg bg-neon-pink/10 border border-neon-pink/30">
+          <AlertTriangle size={12} className="text-neon-pink flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-[10px] font-bold text-neon-pink">已记录为爽约</p>
+            <p className="text-[9px] text-neon-pink/70">
+              开场后未到店也未取消，将影响信用评分
+            </p>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -370,19 +433,19 @@ function TripCard({ spot, trip, replyLabel, onCheckIn, onCancel, onRemove }: {
             </div>
           </div>
 
-          {travelPlan.lateRisk.isLate && (
-            <div className="flex items-start gap-1.5 p-2 rounded-lg bg-neon-orange/10 border border-neon-orange/30">
-              <AlertTriangle size={12} className="text-neon-orange flex-shrink-0 mt-0.5" />
+          {isLateRisk && (
+            <div className="flex items-start gap-1.5 p-2 rounded-lg bg-neon-pink/10 border border-neon-pink/30">
+              <AlertTriangle size={12} className="text-neon-pink flex-shrink-0 mt-0.5" />
               <div>
-                <p className="text-[10px] font-bold text-neon-orange">高迟到风险</p>
-                <p className="text-[9px] text-neon-orange/70">
-                  路程需 {travelPlan.lateRisk.minutesNeeded} 分钟，时间紧张
+                <p className="text-[10px] font-bold text-neon-pink">高迟到风险</p>
+                <p className="text-[9px] text-neon-pink/70">
+                  路程需 {travelPlan.lateRisk.minutesNeeded} 分钟，时间非常紧张
                 </p>
               </div>
             </div>
           )}
 
-          {isLocking && !travelPlan.lateRisk.isLate && (
+          {isLocking && !isLateRisk && (
             <div className="flex items-start gap-1.5 p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
               <Flame size={12} className="text-yellow-400 flex-shrink-0 mt-0.5" />
               <div>
@@ -395,7 +458,7 @@ function TripCard({ spot, trip, replyLabel, onCheckIn, onCancel, onRemove }: {
           )}
 
           <div className="flex items-center justify-between mt-2">
-            <div className={`flex items-center gap-1 text-xs font-mono ${isUrgent ? 'neon-text-orange' : 'text-white/50'}`}>
+            <div className={`flex items-center gap-1 text-xs font-mono ${startCountdown.isUrgent ? 'neon-text-orange' : 'text-white/50'}`}>
               <Flame size={12} />
               <span>
                 {startCountdown.isExpired ? '已开场' :
@@ -452,16 +515,16 @@ function TripCard({ spot, trip, replyLabel, onCheckIn, onCancel, onRemove }: {
 
       {isArrived && (
         <div className="mt-3 pt-3 border-t border-white/5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 size={14} className="text-neon-green" />
-              <p className="text-xs text-neon-green/70">已到店，祝你玩得愉快！</p>
-            </div>
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={14} className="text-neon-green" />
+            <p className="text-xs text-neon-green/70">已到店，祝你玩得愉快！</p>
           </div>
         </div>
       )}
 
-      {(hasExpired || isCancelled || isMissed || isNoshow) && isConfirmed && (
+      {renderNoShowNote()}
+
+      {(hasExpired || isCancelled || isMissed || isNoshow || isCompleted) && !isArrived && !isConfirmed && (
         <div className="mt-3 pt-3 border-t border-white/5">
           <div className="flex items-center justify-between">
             <p className="text-xs text-white/30">
